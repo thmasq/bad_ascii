@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+artem = "3"
+image = {version = "0.25", default-features = false, features = ["png"]}
+proc-macro2 = "1.0"
 quote = "1"
 regex = "1"
 syn = "2"

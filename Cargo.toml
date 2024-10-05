@@ -2,8 +2,11 @@
 name = "bad_ascii"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
+
 
 [dependencies]
-artem = "3.0.0"
+artem = "3"
+image = {version = "0.25", default-features = false, features = ["png"]}
 crossterm = "0.28.1"
-image = "0.25.2"
+bad_ascii_proc_macro = { path = "./bad_ascii_proc_macro" }

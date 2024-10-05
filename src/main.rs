@@ -1,4 +1,5 @@
 use artem::convert;
+use core::str;
 use crossterm::QueueableCommand;
 use crossterm::cursor::{self};
 use crossterm::terminal::{self, Clear, ClearType};
@@ -9,18 +10,18 @@ use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-const FPS: u64 = 24;
-const DURATION: u64 = 3;
+const INPUT: &str = "input.mp4";
+const OUTPUT_FPS: u64 = 24;
+const DURATION: u64 = 90;
+const TARGET_SIZE: Option<NonZeroU32> = NonZeroU32::new(160);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let (video_width, video_height) = get_video_dimensions("input.mp4")?;
-	let (term_width, term_height) = terminal::size()?;
-	let target_size = calculate_target_size(term_width, term_height);
+	let (video_width, video_height) = get_video_dimensions(INPUT)?;
 
 	let frames = extract_frames(video_width, video_height)?;
 	let ascii_frames: Vec<Vec<String>> = frames
 		.into_iter()
-		.map(|frame| frame_to_ascii(frame, target_size))
+		.map(|frame| frame_to_ascii(frame, TARGET_SIZE.expect("Invalid TARGET_SIZE definition")))
 		.collect();
 
 	let top = get_vertical_padding(&ascii_frames);
@@ -29,27 +30,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let mut stdout = stdout();
 	stdout.queue(Clear(ClearType::All))?.queue(cursor::Hide)?;
 
-	let start = Instant::now();
-	let frame_duration = Duration::from_millis(1000 / FPS);
+	let frame_duration = Duration::from_secs_f64(1.0 / OUTPUT_FPS as f64);
+	let start_time = Instant::now();
+	let end_time = start_time + Duration::from_secs(DURATION);
 
-	let mut output_buffer = String::new();
+	let mut frame_index = 0;
+	let total_frames = ascii_frames.len();
 
-	for frame in ascii_frames {
-		output_buffer.clear();
+	let mut previous_frame: Option<&Vec<String>> = None;
 
-		for (row, line) in frame.iter().enumerate() {
-			output_buffer.push_str(&format!("\x1B[{};{}H{}\n", top + row as u16, left, line));
+	while Instant::now() < end_time {
+		let frame_start = Instant::now();
+		let current_frame = &ascii_frames[frame_index];
+
+		if let Some(previous) = &previous_frame {
+			for (row, line) in current_frame.iter().enumerate() {
+				if let Some(previous_line) = previous.get(row) {
+					if previous_line != line {
+						let cursor_move = format!("\x1B[{};{}H", top + row as u16, left);
+						stdout.write_all(format!("{}{}", cursor_move, line).as_bytes())?;
+					}
+				}
+			}
+		} else {
+			for (row, line) in current_frame.iter().enumerate() {
+				let cursor_move = format!("\x1B[{};{}H", top + row as u16, left);
+				stdout.write_all(format!("{}{}", cursor_move, line).as_bytes())?;
+			}
 		}
 
-		stdout.write_all(output_buffer.as_bytes())?;
 		stdout.flush()?;
+		previous_frame = Some(current_frame);
 
-		let elapsed = start.elapsed();
-		let wait_time = frame_duration.saturating_sub(Duration::from_millis(
-			elapsed.as_millis() as u64 % frame_duration.as_millis() as u64,
-		));
+		let elapsed = frame_start.duration_since(start_time);
+		frame_index = ((elapsed.as_secs_f64() * OUTPUT_FPS as f64) as usize) % total_frames;
 
-		sleep(wait_time);
+		let frame_end = Instant::now();
+		let frame_processing_time = frame_end - frame_start;
+		if frame_processing_time < frame_duration {
+			sleep(frame_duration - frame_processing_time);
+		}
 	}
 
 	stdout.queue(cursor::Show)?;
@@ -78,20 +98,16 @@ fn get_video_dimensions(input: &str) -> Result<(u32, u32), Box<dyn std::error::E
 	Ok((dimensions[0], dimensions[1]))
 }
 
-fn calculate_target_size(term_width: u16, term_height: u16) -> NonZeroU32 {
-	let horizontal_scale_factor = 2;
-	let target = std::cmp::min(term_width as u32 * horizontal_scale_factor, term_height as u32 * 8 / 10);
-	NonZeroU32::new(target * 4).unwrap_or(NonZeroU32::new(80).unwrap())
-}
-
 fn extract_frames(width: u32, height: u32) -> Result<Vec<DynamicImage>, Box<dyn std::error::Error>> {
 	let mut frames = Vec::new();
 	let mut child = Command::new("ffmpeg")
 		.args(&[
 			"-i",
-			"input.mp4",
+			INPUT,
 			"-t",
 			&DURATION.to_string(),
+			"-r",
+			&OUTPUT_FPS.to_string(),
 			"-f",
 			"image2pipe",
 			"-pix_fmt",
