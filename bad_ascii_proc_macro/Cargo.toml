@@ -1,0 +1,12 @@
+[package]
+name = "bad_ascii_proc_macro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+quote = "1"
+regex = "1"
+syn = "2"
+
+[lib]
+proc-macro = true
